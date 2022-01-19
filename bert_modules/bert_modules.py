@@ -1,5 +1,4 @@
 import copy
-
 import torch.nn as nn
 from torch.nn import Module as Module
 
@@ -39,7 +38,7 @@ class BertAttention(Module):
 class BertIntermediate(Module):
     def __init__(self, config):
         super(BertIntermediate, self).__init__()
-        self.dense = nn.Linear(config['hidden_dim'], config['inter_dim'])
+        self.dense = nn.Linear(config['hidden_dim'], 4 * config['hidden_dim'])
         self.intermediate_act_fn = gelu
 
     def forward(self, hidden_states):
@@ -51,7 +50,7 @@ class BertIntermediate(Module):
 class BertOutput(Module):
     def __init__(self, config):
         super(BertOutput, self).__init__()
-        self.dense = nn.Linear(config['inter_dim'], config['hidden_dim'])
+        self.dense = nn.Linear(4 * config['hidden_dim'], config['hidden_dim'])
         self.LayerNorm = BertLayerNorm(config['hidden_dim'], eps=1e-12)
         self.dropout = nn.Dropout(0.1)
 

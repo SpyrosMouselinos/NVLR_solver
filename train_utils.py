@@ -1,9 +1,6 @@
 import os.path as osp
 import pickle
-import sys
 from sklearn.model_selection import train_test_split
-
-sys.path.insert(0, osp.abspath('..'))
 from torch.utils.data import Dataset
 import torch
 from create_dataset_statistics import nvlr_scene_parser, nvlr_translation_parser
@@ -103,8 +100,8 @@ def analyze_image_slot_of_scene(image_slot):
 def nvlr_single_scene_translator(scene: dict, translation: dict):
     n_objects_per_image_slot = [len(scene['structured_rep'][i]) for i in range(3)]
     question_length = len(scene['sentence'].split(' ')) + 2
-    question = [1] + [translation[f] for f in scene['sentence'].split(' ')] + [2] + (25 - question_length) * [3]
-    question = question[0:25]
+    question = [1] + [translation[f] for f in scene['sentence'].split(' ')] + [2] + (30 - question_length) * [0]
+    question = question[0:30]
     label = LABEL[scene['label']]
     objects_per_scene = []
     for image_slot in range(3):
@@ -127,29 +124,32 @@ def nvlr_single_scene_translator(scene: dict, translation: dict):
         for empty_slots in range((8 - n_objects)):
             objects_per_image_slot.append([-1, -1, -1, -1, -1])
         objects_per_scene.append(objects_per_image_slot)
-    # Convert Mask and Send Back #
+    # Convert Object Mask and Send Back #
     mask = []
     for f in range(3):
         mask.append([[1] * n_objects_per_image_slot[f] + [0] * (8 - n_objects_per_image_slot[f])])
-
+    # Convert Question Mask and Send Back #
+    qmask = [1] * question_length + (30 - question_length) * [0]
     # Pack into a dictionary #
-    return objects_per_scene, mask, question, label
+    return objects_per_scene, mask, qmask, question, label
 
 
 def nvlr_scene_translation(mode='clean_traindev'):
-    scenes = nvlr_scene_parser(scenes_path='clean_data/', mode=mode)
+    scenes = nvlr_scene_parser(scenes_path='../clean_data/', mode=mode)
     translation = nvlr_translation_parser()
     dataset_ = {
         'scene_objects': [],
         'mask': [],
+        'qmask': [],
         'question': [],
         'label': []
     }
     for s in scenes['scenes'][0]['scenes']:
-        objects_per_scene, mask, question, label = nvlr_single_scene_translator(s, translation)
+        objects_per_scene, mask,qmask, question, label = nvlr_single_scene_translator(s, translation)
         # PyTorch Conversion #
         dataset_['scene_objects'].append(torch.FloatTensor(objects_per_scene).unsqueeze(0))
         dataset_['mask'].append(torch.FloatTensor(mask).transpose(1, 0))
+        dataset_['qmask'].append(torch.FloatTensor(qmask).unsqueeze(0))
         dataset_['question'].append(torch.LongTensor(question).unsqueeze(0))
         dataset_['label'].append(torch.LongTensor([label]))
     return dataset_
@@ -159,13 +159,14 @@ class StateNVLR(Dataset):
     """NVLR dataset made from Scene States."""
 
     def __init__(self, split='train'):
-        if osp.exists(f'clean_data/{split}_dataset.pt'):
-            with open(f'clean_data/{split}_dataset.pt', 'rb') as fin:
+        if osp.exists(f'../clean_data/{split}_dataset.pt'):
+            with open(f'../clean_data/{split}_dataset.pt', 'rb') as fin:
                 info = pickle.load(fin)
             self.split = info['split']
             self.x = info['x']
             self.q = info['q']
             self.m = info['m']
+            self.qm = info['qm']
             self.y = info['y']
             print("Dataset loaded succesfully!\n")
         else:
@@ -177,6 +178,7 @@ class StateNVLR(Dataset):
             self.x = torch.cat(dataset_dict['scene_objects'], dim=0)
             self.q = torch.cat(dataset_dict['question'], dim=0)
             self.m = torch.cat(dataset_dict['mask'], dim=0)
+            self.qm = torch.cat(dataset_dict['qmask'], dim=0)
             self.y = dataset_dict['label']
             print("Dataset loaded succesfully!...Saving\n")
 
@@ -185,9 +187,10 @@ class StateNVLR(Dataset):
                 'x': self.x,
                 'q': self.q,
                 'm': self.m,
+                'qm': self.qm,
                 'y': self.y
             }
-            with open(f'clean_data/{self.split}_dataset.pt', 'wb') as fout:
+            with open(f'../clean_data/{self.split}_dataset.pt', 'wb') as fout:
                 pickle.dump(info, fout)
 
     def __len__(self):
@@ -196,7 +199,7 @@ class StateNVLR(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        return self.x[idx], self.q[idx], self.m[idx], self.y[idx]
+        return self.x[idx], self.q[idx], self.m[idx], self.qm[idx], self.y[idx]
 
 
 def instansiate_train_dev_test(batch_size=4, validation_split=0.2):
@@ -207,7 +210,7 @@ def instansiate_train_dev_test(batch_size=4, validation_split=0.2):
     train_dataset = torch.utils.data.Subset(td, train_indices)
     val_dataset = torch.utils.data.Subset(td, val_indices)
 
-    train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
-    val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
-    test_data_loader = torch.utils.data.DataLoader(te, batch_size=batch_size, shuffle=False, num_workers=1)
+    train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_data_loader = torch.utils.data.DataLoader(te, batch_size=batch_size, shuffle=False)
     return train_data_loader, val_data_loader, test_data_loader

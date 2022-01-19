@@ -8,7 +8,6 @@ from natsort import natsorted
 from tqdm import trange
 from textblob import TextBlob
 
-sys.path.insert(0, osp.abspath('..'))
 
 
 def remove_punct(s):
@@ -53,8 +52,8 @@ def nvlr_append_datasets(dataset_1, dataset_2, give_name='mixed', save=False):
 
 
 def prepare_train_dev():
-    train_json = nvlr_scene_parser(scenes_path='data/', mode='train')
-    dev_json = nvlr_scene_parser(scenes_path='data/', mode='val')
+    train_json = nvlr_scene_parser(scenes_path='../data/', mode='train')
+    dev_json = nvlr_scene_parser(scenes_path='../data/', mode='val')
     x = nvlr_append_datasets(train_json, dev_json, give_name='mixed', save=False)
 
     question_tokens = {}
@@ -68,7 +67,7 @@ def prepare_train_dev():
                 question_tokens.update({f: 1})
 
     print("Saving Dictionary With Frequencies...\n")
-    with open('question_vocabulary_clean.json', 'w') as fout:
+    with open('../question_vocabulary_clean.json', 'w') as fout:
         json.dump(question_tokens, fout)
 
 
@@ -157,7 +156,7 @@ def reduce_and_resave_test(vocabulary_path='question_vocabulary_clean.json', cut
     return
 
 
-def create_translation_dict(vocabulary_path='question_vocabulary_clean.json'):
+def create_translation_dict(vocabulary_path='../question_vocabulary_clean.json'):
     print(f"Opening vocabulary...\n")
     try:
         with open(vocabulary_path, 'r') as fin:
@@ -175,7 +174,7 @@ def create_translation_dict(vocabulary_path='question_vocabulary_clean.json'):
         translation.update({item: index + 2})
 
     print("Lets save it!\n")
-    with open('translation_vocabulary.json', 'w') as fout:
+    with open('../translation_vocabulary.json', 'w') as fout:
         json.dump(translation, fout)
 
     return
@@ -183,10 +182,10 @@ def create_translation_dict(vocabulary_path='question_vocabulary_clean.json'):
 
 def nvlr_translation_parser():
     try:
-        with open('translation_vocabulary.json', 'r') as fin:
+        with open('../translation_vocabulary.json', 'r') as fin:
             data = json.load(fin)
     except FileNotFoundError:
         create_translation_dict()
-        with open('translation_vocabulary.json', 'r') as fin:
+        with open('../translation_vocabulary.json', 'r') as fin:
             data = json.load(fin)
     return data
