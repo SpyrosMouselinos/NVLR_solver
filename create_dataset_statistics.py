@@ -7,7 +7,15 @@ import copy
 from natsort import natsorted
 from tqdm import trange
 from textblob import TextBlob
+from nltk.stem import WordNetLemmatizer
 
+
+def replace_with_similar(word):
+    if word.lower() in ['square', 'rectangle', 'squares', 'blocks']:
+        return 'block'
+    if word.lower() in ['object', 'objects']:
+        return 'item'
+    return word.lower()
 
 
 def remove_punct(s):
@@ -52,29 +60,34 @@ def nvlr_append_datasets(dataset_1, dataset_2, give_name='mixed', save=False):
 
 
 def prepare_train_dev():
-    train_json = nvlr_scene_parser(scenes_path='../data/', mode='train')
-    dev_json = nvlr_scene_parser(scenes_path='../data/', mode='val')
+    lemmatizer = WordNetLemmatizer()
+    train_json = nvlr_scene_parser(scenes_path='./data/', mode='train')
+    dev_json = nvlr_scene_parser(scenes_path='./data/', mode='val')
     x = nvlr_append_datasets(train_json, dev_json, give_name='mixed', save=False)
 
     question_tokens = {}
     for scene in x['scenes']:
         corrected_sentence = str(TextBlob(scene['sentence']).correct())
         list_of_words = num_2word(remove_punct(corrected_sentence.strip()).split(' '))
-        for f in list_of_words:
+        list_of_correct_words = [replace_with_similar(f) for f in list_of_words]
+        lemmatized_list_of_words = [lemmatizer.lemmatize(f) for f in list_of_correct_words]
+
+        for f in lemmatized_list_of_words:
             if f in question_tokens:
                 question_tokens[f] += 1
             else:
                 question_tokens.update({f: 1})
 
     print("Saving Dictionary With Frequencies...\n")
-    with open('../question_vocabulary_clean.json', 'w') as fout:
+    with open('./question_vocabulary_clean.json', 'w') as fout:
         json.dump(question_tokens, fout)
 
 
-def reduce_and_resave_traindev(vocabulary_path='question_vocabulary_clean.json', cutoff_threshold=10):
+def reduce_and_resave_traindev(vocabulary_path='./question_vocabulary_clean.json', cutoff_threshold=60):
+    lemmatizer = WordNetLemmatizer()
     print(f"Opening  data...\n")
-    train_json = nvlr_scene_parser(scenes_path='data/', mode='train')
-    dev_json = nvlr_scene_parser(scenes_path='data/', mode='val')
+    train_json = nvlr_scene_parser(scenes_path='./data/', mode='train')
+    dev_json = nvlr_scene_parser(scenes_path='./data/', mode='val')
     data = nvlr_append_datasets(train_json, dev_json, give_name='mixed', save=False)
     print(f"Opening vocabulary...\n")
     try:
@@ -91,10 +104,12 @@ def reduce_and_resave_traindev(vocabulary_path='question_vocabulary_clean.json',
         # Clean the sentence #
         corrected_sentence = str(TextBlob(scene['sentence']).correct())
         list_of_words = num_2word(remove_punct(corrected_sentence.strip()).split(' '))
+        list_of_correct_words = [replace_with_similar(f) for f in list_of_words]
+        lemmatized_list_of_words = [lemmatizer.lemmatize(f) for f in list_of_correct_words]
         flag = True
-        for f in list_of_words:
+        for f in lemmatized_list_of_words:
             if f in vocab:
-                if vocab[f] < cutoff_threshold:
+                if vocab[f] < cutoff_threshold or f in  ['grey','ha']:
                     flag = False
                     break
             else:
@@ -102,18 +117,19 @@ def reduce_and_resave_traindev(vocabulary_path='question_vocabulary_clean.json',
 
         if flag:
             new_scene = copy.deepcopy(scene)
-            new_scene['sentence'] = ' '.join(list_of_words)
+            new_scene['sentence'] = ' '.join(lemmatized_list_of_words)
             clean['scenes'].append(new_scene)
         else:
             pass
-    with open('clean_data/clean_traindev.json', 'w') as fout:
+    with open('./clean_data/clean_traindev.json', 'w') as fout:
         json.dump(clean, fout)
     return
 
 
-def reduce_and_resave_test(vocabulary_path='question_vocabulary_clean.json', cutoff_threshold=10):
+def reduce_and_resave_test(vocabulary_path='./question_vocabulary_clean.json', cutoff_threshold=60):
+    lemmatizer = WordNetLemmatizer()
     print(f"Opening  data...\n")
-    data = nvlr_scene_parser(scenes_path='data/', mode='test')
+    data = nvlr_scene_parser(scenes_path='./data/', mode='test')
     print(f"Opening vocabulary...\n")
     try:
         with open(vocabulary_path, 'r') as fin:
@@ -129,13 +145,15 @@ def reduce_and_resave_test(vocabulary_path='question_vocabulary_clean.json', cut
         # Clean the sentence #
         corrected_sentence = str(TextBlob(scene['sentence']).correct())
         list_of_words = num_2word(remove_punct(corrected_sentence.strip()).split(' '))
+        list_of_correct_words = [replace_with_similar(f) for f in list_of_words]
+        lemmatized_list_of_words = [lemmatizer.lemmatize(f) for f in list_of_correct_words]
         flag = True
-        for f in list_of_words:
+        for f in lemmatized_list_of_words:
             if f in vocab:
-                if vocab[f] < cutoff_threshold:
+                if vocab[f] < cutoff_threshold or f in  ['grey','ha']:
                     flag = False
                     print(
-                        f"The word {f} of sentence {' '.join(list_of_words)} is below threshold {cutoff_threshold}!\n")
+                        f"The word {f} of sentence {' '.join(lemmatized_list_of_words)} is below threshold {cutoff_threshold}!\n")
                     break
             else:
                 # raise ValueError(f"How come {f} is not in the vocabulary?\n")
@@ -147,16 +165,16 @@ def reduce_and_resave_test(vocabulary_path='question_vocabulary_clean.json', cut
 
         if flag:
             new_scene = copy.deepcopy(scene)
-            new_scene['sentence'] = ' '.join(list_of_words)
+            new_scene['sentence'] = ' '.join(lemmatized_list_of_words)
             clean['scenes'].append(new_scene)
         else:
             pass
-    with open('clean_data/clean_test.json', 'w') as fout:
+    with open('./clean_data/clean_test.json', 'w') as fout:
         json.dump(clean, fout)
     return
 
 
-def create_translation_dict(vocabulary_path='../question_vocabulary_clean.json'):
+def create_translation_dict(vocabulary_path='./question_vocabulary_clean.json'):
     print(f"Opening vocabulary...\n")
     try:
         with open(vocabulary_path, 'r') as fin:
@@ -169,12 +187,12 @@ def create_translation_dict(vocabulary_path='../question_vocabulary_clean.json')
 
     print("Lets create the translation dict\n")
     vocab = natsorted(vocab)
-    translation = {'NULL':0, '<START>': 1, '<END>': 2}
+    translation = {'NULL': 0, '<START>': 1, '<END>': 2}
     for index, item in enumerate(vocab):
         translation.update({item: index + 2})
 
     print("Lets save it!\n")
-    with open('../translation_vocabulary.json', 'w') as fout:
+    with open('./translation_vocabulary.json', 'w') as fout:
         json.dump(translation, fout)
 
     return
@@ -182,10 +200,13 @@ def create_translation_dict(vocabulary_path='../question_vocabulary_clean.json')
 
 def nvlr_translation_parser():
     try:
-        with open('../translation_vocabulary.json', 'r') as fin:
+        with open('./translation_vocabulary.json', 'r') as fin:
             data = json.load(fin)
     except FileNotFoundError:
         create_translation_dict()
-        with open('../translation_vocabulary.json', 'r') as fin:
+        with open('./translation_vocabulary.json', 'r') as fin:
             data = json.load(fin)
     return data
+
+# reduce_and_resave_traindev(cutoff_threshold=100)
+# reduce_and_resave_test(cutoff_threshold=100)

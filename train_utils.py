@@ -6,23 +6,23 @@ import torch
 from create_dataset_statistics import nvlr_scene_parser, nvlr_translation_parser
 
 COLORS = {
-    'black': 0,
-    'Black': 0,
-    'Yellow': 1,
-    'yellow': 1,
-    'blue': 2,
-    'Blue': 2,
-    '#0099ff': 2
+    'black': [0, 0, 1],
+    'Black': [0, 0, 1],
+    'Yellow': [0, 1, 0],
+    'yellow': [0, 1, 0],
+    'blue': [1, 0, 0],
+    'Blue': [1, 0, 0],
+    '#0099ff': [1, 0, 0]
 }
 SHAPES = {
-    'square': 0,
-    'Square': 0,
-    'Block': 0,
-    'block': 0,
-    'Circle': 1,
-    'circle': 1,
-    'Triangle': 2,
-    'triangle': 2
+    'square': [0, 0, 1],
+    'Square': [0, 0, 1],
+    'Block': [0, 0, 1],
+    'block': [0, 0, 1],
+    'Circle': [0, 1, 0],
+    'circle': [0, 1, 0],
+    'Triangle': [1, 0, 0],
+    'triangle': [1, 0, 0],
 }
 LABEL = {'True': 1,
          'true': 1,
@@ -108,9 +108,9 @@ def nvlr_single_scene_translator(scene: dict, translation: dict):
         n_objects = n_objects_per_image_slot[image_slot]
         objects_per_image_slot = []
         xs, ys, shapes, colors, sizes = analyze_image_slot_of_scene(scene['structured_rep'][image_slot])
-        xs_ = [f / 100 for f in xs]
+        xs_ = [(f - 50) / 100 for f in xs]
         # scene_xs.append(torch.FloatTensor(xs_ + (7 - n_objects) * [0]).unsqueeze(1))
-        ys_ = [f / 100 for f in ys]
+        ys_ = [(f - 50) / 100 for f in ys]
         # scene_ys.append(torch.FloatTensor(ys_ + (7 - n_objects) * [0]).unsqueeze(1))
         shapes_ = [SHAPES[f] for f in shapes]
         # scene_shapes.append(torch.LongTensor(shapes_ + (7 - n_objects) * [0]))
@@ -119,10 +119,10 @@ def nvlr_single_scene_translator(scene: dict, translation: dict):
         sizes_ = [f / 100 for f in sizes]
         # scene_sizes.append(torch.LongTensor(sizes_ + (7 - n_objects) * [0]))
         for x, y, sh, c, sz in zip(xs_, ys_, shapes_, colors_, sizes_):
-            object_ = [x, y, sh, c, sz]
+            object_ = [x, y, sh[0], sh[1], sh[2], c[0], c[1], c[2], sz]
             objects_per_image_slot.append(object_)
         for empty_slots in range((8 - n_objects)):
-            objects_per_image_slot.append([-1, -1, -1, -1, -1])
+            objects_per_image_slot.append([0, 0, 0, 0, 0, 0, 0, 0, 0])
         objects_per_scene.append(objects_per_image_slot)
     # Convert Object Mask and Send Back #
     mask = []
@@ -135,7 +135,7 @@ def nvlr_single_scene_translator(scene: dict, translation: dict):
 
 
 def nvlr_scene_translation(mode='clean_traindev'):
-    scenes = nvlr_scene_parser(scenes_path='../clean_data/', mode=mode)
+    scenes = nvlr_scene_parser(scenes_path='./clean_data/', mode=mode)
     translation = nvlr_translation_parser()
     dataset_ = {
         'scene_objects': [],
@@ -145,7 +145,7 @@ def nvlr_scene_translation(mode='clean_traindev'):
         'label': []
     }
     for s in scenes['scenes'][0]['scenes']:
-        objects_per_scene, mask,qmask, question, label = nvlr_single_scene_translator(s, translation)
+        objects_per_scene, mask, qmask, question, label = nvlr_single_scene_translator(s, translation)
         # PyTorch Conversion #
         dataset_['scene_objects'].append(torch.FloatTensor(objects_per_scene).unsqueeze(0))
         dataset_['mask'].append(torch.FloatTensor(mask).transpose(1, 0))
@@ -159,8 +159,8 @@ class StateNVLR(Dataset):
     """NVLR dataset made from Scene States."""
 
     def __init__(self, split='train'):
-        if osp.exists(f'../clean_data/{split}_dataset.pt'):
-            with open(f'../clean_data/{split}_dataset.pt', 'rb') as fin:
+        if osp.exists(f'./clean_data/{split}_dataset.pt'):
+            with open(f'./clean_data/{split}_dataset.pt', 'rb') as fin:
                 info = pickle.load(fin)
             self.split = info['split']
             self.x = info['x']
@@ -190,7 +190,7 @@ class StateNVLR(Dataset):
                 'qm': self.qm,
                 'y': self.y
             }
-            with open(f'../clean_data/{self.split}_dataset.pt', 'wb') as fout:
+            with open(f'./clean_data/{self.split}_dataset.pt', 'wb') as fout:
                 pickle.dump(info, fout)
 
     def __len__(self):

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import Module as Module
 from bert_modules.bert_modules import BertEncoder
 from bert_modules.utils import BertLayerNorm, PositionalEncoding
@@ -68,27 +69,15 @@ class SplitModalObjectEmbedder(Module):
 
 
 class MLPClassifierHead(Module):
-    def __init__(self, config: dict, use_log_transform=False, mode='raw'):
+    def __init__(self, config: dict):
         super(MLPClassifierHead, self).__init__()
         self.linear_layer_1 = nn.Linear(config['hidden_dim'], config['hidden_dim'])
         self.linear_layer_2 = nn.Linear(config['hidden_dim'], config['num_output_classes'])
 
-        if mode == 'arg':
-            self.softmax_layer = lambda x: torch.argmax(x, dim=1, keepdim=True)
-        elif mode == 'soft':
-            if use_log_transform:
-                self.softmax_layer = nn.LogSoftmax(dim=1)
-            else:
-                self.softmax_layer = nn.Softmax(dim=1)
-        elif mode == 'raw':
-            self.softmax_layer = lambda x: x
-        else:
-            raise NotImplementedError(f"Mode: {mode} not implemented in MLPClassifierHead Module...")
-        return
-
     def forward(self, input):
-        input = nn.ReLU()(self.linear_layer_1(input))
-        return self.softmax_layer(self.linear_layer_2(input))
+        relued = F.relu(self.linear_layer_1(input), inplace=True)
+        outprob = F.sigmoid(self.linear_layer_2(relued))
+        return outprob
 
 
 class NVLRformer(Module):
@@ -97,14 +86,24 @@ class NVLRformer(Module):
         self.sme = SplitModalObjectEmbedder(config)
         self.be = BertEncoder(config)
         self.classhead = MLPClassifierHead(config)
+        if int(config['mask_type']) == 1:
+            self.mask_calculation = self.calc_patches
+        else:
+            self.mask_calculation = self.simple_mask
         return
 
     @staticmethod
     def calc_patches(masks, qmasks):
-        mask_1 = torch.cat([masks[:, 0], torch.stack([torch.FloatTensor([0] * 16)] * masks.size(0), dim=0)], dim=1)
-        mask_2 = torch.cat([torch.stack([torch.FloatTensor([0] * 8)] * masks.size(0), dim=0), masks[:, 1],
-                            torch.stack([torch.FloatTensor([0] * 8)] * masks.size(0), dim=0)], dim=1)
-        mask_3 = torch.cat([torch.stack([torch.FloatTensor([0] * 16)] * masks.size(0), dim=0), masks[:, 2]], dim=1)
+        device = masks.device
+        dummy_max  = torch.stack([torch.FloatTensor([0] * 24)] * masks.size(0), dim=0)
+        dummy_max  = dummy_max.to(device)
+        dummy_full = torch.stack([torch.FloatTensor([0] * 16)] * masks.size(0), dim=0)
+        dummy_full = dummy_full.to(device)
+        dummy_half = torch.stack([torch.FloatTensor([0] * 8)] * masks.size(0), dim=0)
+        dummy_half = dummy_half.to(device)
+        mask_1 = torch.cat([masks[:, 0], dummy_full], dim=1)
+        mask_2 = torch.cat([dummy_half, masks[:, 1], dummy_half], dim=1)
+        mask_3 = torch.cat([dummy_full, masks[:, 2]], dim=1)
         pad_mask1 = torch.stack([mask_1] * 8, dim=1)
         pad_mask2 = torch.stack([mask_2] * 8, dim=1)
         pad_mask3 = torch.stack([mask_3] * 8, dim=1)
@@ -112,7 +111,7 @@ class NVLRformer(Module):
         full_mask = torch.cat([pad_mask1, pad_mask2, pad_mask3], dim=1)
         full_mask = torch.cat([full_mask, qmasks_], dim=2)
         # Now fix the resting Q #
-        flat_obj_mask = torch.cat([masks.view(-1, 24), qmasks], dim=1)
+        flat_obj_mask = torch.cat([dummy_max, qmasks], dim=1)
         flat_obj_mask = torch.stack([flat_obj_mask] * 30, dim=1)
 
         full_mask = torch.cat([full_mask, flat_obj_mask], dim=1).unsqueeze(1)
@@ -120,12 +119,18 @@ class NVLRformer(Module):
         cross_mask = (1.0 - full_mask) * -10000.0
         return cross_mask
 
+    @staticmethod
+    def simple_mask(masks, qmasks):
+        full_mask = torch.stack([torch.cat([masks.view(-1, 24), qmasks], dim=-1)] * 54, dim=1).unsqueeze(1)
+        cross_mask = (1.0 - full_mask) * -10000.0
+        return cross_mask
+
     def forward(self, objects, question, mask, qmask, labels):
         final_obj, final_q, final_mask, final_qmask = self.sme(objects, question, mask, qmask)
-        cross_mask = self.calc_patches(final_mask, final_qmask)
+        cross_mask = self.simple_mask(final_mask, final_qmask)
         embeddings = torch.cat([final_obj, final_q], dim=1)
         out, atts = self.be.forward(embeddings, cross_mask, output_all_encoded_layers=False,
                                     output_attention_probs=True)
-        item_output = out[-1][:, 24, :]
+        item_output = torch.mean(out[-1][:, 0:24, :], dim=1)
         answer = self.classhead(item_output)
         return answer, atts, item_output
